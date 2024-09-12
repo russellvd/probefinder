@@ -1,0 +1,7 @@
+{
+  "name": "probe-finder",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "react-vite"
+}
