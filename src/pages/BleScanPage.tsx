@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonList, IonItem, IonLabel, IonAccordionGroup, IonAccordion, IonText } from '@ionic/react';
-import { BleDevice, BleClient } from '@capacitor-community/bluetooth-le';
-import { scanForBleDevices, formatBleDevice, connectToBleDevice, getRssiDescription, getDeviceServices, getBatteryLevel, sendBeep } from '../utils/bleUtils';
+import { BleDevice, BleClient, ScanResult } from '@capacitor-community/bluetooth-le';
+import { formatBleDevice, connectToBleDevice, getRssiDescription, getDeviceServices, getBatteryLevel, sendBeep } from '../utils/bleUtils';
 import BatteryStatus from '../components/BatteryStatus';
 
 const BleScanPage: React.FC = () => {
@@ -12,27 +12,90 @@ const BleScanPage: React.FC = () => {
   const [deviceServicesWithCharacteristics, setDeviceServicesWithCharacteristics] = useState<{ [key: string]: { [serviceUuid: string]: string[] } }>({});
   const [rssiDescriptions, setRssiDescriptions] = useState<{ [deviceId: string]: { description: string, color: string } }>({});
   const [batteryLevels, setBatteryLevels] = useState<{ [deviceId: string]: number }>({});
+  const rssiUpdateIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const startScan = async () => {
     setIsScanning(true);
     console.log('Scan started...');
     try {
-      const discoveredDevices = await scanForBleDevices();
-      console.log('Discovered Devices:', discoveredDevices);
-      setDevices(discoveredDevices);
-
-      const newRssiDescriptions = discoveredDevices.reduce((acc, device) => {
-        const rssiDescription = getRssiDescription(device.rssi);
-        acc[device.deviceId] = rssiDescription;
-        return acc;
-      }, {} as { [deviceId: string]: { description: string, color: string } });
-
-      setRssiDescriptions(newRssiDescriptions);
+      await BleClient.initialize();
+      await BleClient.requestLEScan(
+        {
+          services: ['71C47CD7-D486-4CA3-A350-8379EDFAED8C'], // PRIMARY_SERVICE UUID
+        },
+        (result) => handleScanResult(result)
+      );
+      
+      // Start periodic RSSI updates
+      rssiUpdateIntervalRef.current = setInterval(updateRssiForAllDevices, 2000);
     } catch (error) {
       console.error('Error during BLE scan:', error);
+      setIsScanning(false);
     }
-    setIsScanning(false);
   };
+
+  const handleScanResult = (result: ScanResult) => {
+    const { device, rssi } = result;
+    if (rssi !== undefined) {
+      setDevices((prevDevices) => {
+        const existingDeviceIndex = prevDevices.findIndex(d => d.deviceId === device.deviceId);
+        if (existingDeviceIndex !== -1) {
+          const updatedDevices = [...prevDevices];
+          updatedDevices[existingDeviceIndex] = { ...updatedDevices[existingDeviceIndex], rssi };
+          return updatedDevices;
+        } else {
+          return [...prevDevices, { ...device, rssi }];
+        }
+      });
+      updateRssiDescription(device.deviceId, rssi);
+    }
+  };
+
+  const stopScan = async () => {
+    console.log('Stopping scan...');
+    try {
+      await BleClient.stopLEScan();
+      setIsScanning(false);
+      // Stop periodic RSSI updates
+      if (rssiUpdateIntervalRef.current) {
+        clearInterval(rssiUpdateIntervalRef.current);
+        rssiUpdateIntervalRef.current = null;
+      }
+    } catch (error) {
+      console.error('Error stopping BLE scan:', error);
+    }
+  };
+
+  const updateRssiDescription = (deviceId: string, rssi: number) => {
+    const rssiDescription = getRssiDescription(rssi);
+    setRssiDescriptions((prevDescriptions) => ({
+      ...prevDescriptions,
+      [deviceId]: rssiDescription,
+    }));
+  };
+
+  const updateRssiForAllDevices = async () => {
+    try {
+      await BleClient.initialize();
+      await BleClient.requestLEScan(
+        {
+          services: ['71C47CD7-D486-4CA3-A350-8379EDFAED8C'], // PRIMARY_SERVICE UUID
+        },
+        (result) => handleScanResult(result)
+      );
+    } catch (error) {
+      console.error('Error during BLE scan:', error);
+      setIsScanning(false);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (isScanning) {
+        stopScan();
+      }
+    };
+  }, []);
 
   const handleConnectToDevice = async (device: BleDevice & { rssi: number }) => {
     setConnectingDeviceId(device.deviceId);
@@ -76,7 +139,6 @@ const BleScanPage: React.FC = () => {
   const handleBeep = async (deviceId: string) => {
     console.log(`Sending BEEP to device: ${deviceId}`);
     try {
-      const serviceUUID = Object.keys(deviceServicesWithCharacteristics[deviceId])[0]; // Get the first service UUID
       await sendBeep(deviceId);
       console.log('BEEP command sent successfully');
     } catch (error) {
@@ -110,7 +172,7 @@ const BleScanPage: React.FC = () => {
                       fontWeight: 'bold'
                     }}
                   >
-                    {rssiDescriptions[device.deviceId]?.description || 'Description not available'}
+                    {rssiDescriptions[device.deviceId]?.description || 'Description not available'} ({device.rssi} dBm)
                   </IonText>
                 </IonItem>
 
@@ -129,7 +191,6 @@ const BleScanPage: React.FC = () => {
                         Disconnect
                       </IonButton>
 
-                      {/* Red Button for Sending BEEP */}
                       <IonButton
                         expand="block"
                         color="tertiary"
@@ -152,6 +213,17 @@ const BleScanPage: React.FC = () => {
             ))}
           </IonAccordionGroup>
         </IonList>
+
+        <IonButton
+          expand="block"
+          color="danger"
+          fill="outline"
+          onClick={stopScan}
+          disabled={!isScanning}
+          style={{ position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)', width: '90%' }}
+        >
+          Stop Scan
+        </IonButton>
       </IonContent>
     </IonPage>
   );

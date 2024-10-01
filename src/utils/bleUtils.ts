@@ -22,10 +22,10 @@ const RSSI_THRESHOLDS: RssiThreshold[] = [
 
 /**
  * Initializes the BLE module and starts scanning for devices.
- * @param scanDuration Duration of the scan in milliseconds (default: 5000ms)
+ * @param scanDuration Duration of the scan in milliseconds (default: 2 second intervals)
  * @returns A promise that resolves to an array of discovered BLE devices
  */
-export async function scanForBleDevices(scanDuration: number = 5000): Promise<(BleDevice & { rssi: number })[]> {
+export async function scanForBleDevices(scanDuration: number = 2000): Promise<(BleDevice & { rssi: number })[]> {
   const devices: (BleDevice & { rssi: number })[] = [];
   console.log("scan start!");
 
