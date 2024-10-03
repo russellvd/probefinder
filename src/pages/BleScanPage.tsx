@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonList, IonItem, IonLabel, IonAccordionGroup, IonAccordion, IonText } from '@ionic/react';
-import { BleDevice, BleClient, ScanResult } from '@capacitor-community/bluetooth-le';
-import { formatBleDevice, connectToBleDevice, getRssiDescription, getDeviceServices, getBatteryLevel, sendBeep } from '../utils/bleUtils';
+import { IonContent, IonBadge, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonList, IonItem, IonLabel, IonAccordionGroup, IonAccordion, IonText, IonCard, IonCardContent, IonIcon, IonChip } from '@ionic/react';
+import { bluetooth, batteryFull, wifi } from 'ionicons/icons';
+import { BleDevice, BleClient } from '@capacitor-community/bluetooth-le';
+import { formatBleDevice, connectToBleDevice, getRssiDescription, getDeviceServices, getBatteryLevel, sendBeep, readSerialNumber, startScan, stopScan } from '../utils/bleUtils';
 import BatteryStatus from '../components/BatteryStatus';
+import './customStyles.css'; // Include this line to apply custom styles
 
 const BleScanPage: React.FC = () => {
   const [devices, setDevices] = useState<(BleDevice & { rssi: number })[]>([]);
@@ -12,51 +14,32 @@ const BleScanPage: React.FC = () => {
   const [deviceServicesWithCharacteristics, setDeviceServicesWithCharacteristics] = useState<{ [key: string]: { [serviceUuid: string]: string[] } }>({});
   const [rssiDescriptions, setRssiDescriptions] = useState<{ [deviceId: string]: { description: string, color: string } }>({});
   const [batteryLevels, setBatteryLevels] = useState<{ [deviceId: string]: number }>({});
+  const [serialNumbers, setSerialNumbers] = useState<{ [deviceId: string]: string }>({});
   const rssiUpdateIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const startScan = async () => {
+  useEffect(() => {
+    return () => {
+      if (isScanning) {
+        stopScan();
+      }
+    };
+  }, []);
+
+  const handleStartScan = async () => {
     setIsScanning(true);
-    console.log('Scan started...');
     try {
-      await BleClient.initialize();
-      await BleClient.requestLEScan(
-        {
-          services: ['71C47CD7-D486-4CA3-A350-8379EDFAED8C'], // PRIMARY_SERVICE UUID
-        },
-        (result) => handleScanResult(result)
-      );
-      
-      // Start periodic RSSI updates
-      rssiUpdateIntervalRef.current = setInterval(updateRssiForAllDevices, 2000);
+      await startScan((result) => handleScanResult(result));
+      rssiUpdateIntervalRef.current = setInterval(updateRssiForAllDevices, 4000);
     } catch (error) {
       console.error('Error during BLE scan:', error);
       setIsScanning(false);
     }
   };
 
-  const handleScanResult = (result: ScanResult) => {
-    const { device, rssi } = result;
-    if (rssi !== undefined) {
-      setDevices((prevDevices) => {
-        const existingDeviceIndex = prevDevices.findIndex(d => d.deviceId === device.deviceId);
-        if (existingDeviceIndex !== -1) {
-          const updatedDevices = [...prevDevices];
-          updatedDevices[existingDeviceIndex] = { ...updatedDevices[existingDeviceIndex], rssi };
-          return updatedDevices;
-        } else {
-          return [...prevDevices, { ...device, rssi }];
-        }
-      });
-      updateRssiDescription(device.deviceId, rssi);
-    }
-  };
-
-  const stopScan = async () => {
-    console.log('Stopping scan...');
+  const handleStopScan = async () => {
     try {
-      await BleClient.stopLEScan();
+      await stopScan();
       setIsScanning(false);
-      // Stop periodic RSSI updates
       if (rssiUpdateIntervalRef.current) {
         clearInterval(rssiUpdateIntervalRef.current);
         rssiUpdateIntervalRef.current = null;
@@ -64,6 +47,22 @@ const BleScanPage: React.FC = () => {
     } catch (error) {
       console.error('Error stopping BLE scan:', error);
     }
+  };
+
+  const handleScanResult = (result: { device: BleDevice; rssi: number }) => {
+    const { device, rssi } = result;
+
+    setDevices((prevDevices) => {
+      const existingDeviceIndex = prevDevices.findIndex((d) => d.deviceId === device.deviceId);
+      if (existingDeviceIndex !== -1) {
+        const updatedDevices = [...prevDevices];
+        updatedDevices[existingDeviceIndex] = { ...updatedDevices[existingDeviceIndex], rssi };
+        return updatedDevices;
+      } else {
+        return [...prevDevices, { ...device, rssi }];
+      }
+    });
+    updateRssiDescription(device.deviceId, rssi);
   };
 
   const updateRssiDescription = (deviceId: string, rssi: number) => {
@@ -76,49 +75,36 @@ const BleScanPage: React.FC = () => {
 
   const updateRssiForAllDevices = async () => {
     try {
-      await BleClient.initialize();
-      await BleClient.requestLEScan(
-        {
-          services: ['71C47CD7-D486-4CA3-A350-8379EDFAED8C'], // PRIMARY_SERVICE UUID
-        },
-        (result) => handleScanResult(result)
-      );
+      await startScan((result) => handleScanResult(result));
     } catch (error) {
       console.error('Error during BLE scan:', error);
       setIsScanning(false);
     }
   };
 
-  useEffect(() => {
-    return () => {
-      if (isScanning) {
-        stopScan();
-      }
-    };
-  }, []);
-
   const handleConnectToDevice = async (device: BleDevice & { rssi: number }) => {
     setConnectingDeviceId(device.deviceId);
-    console.log(`Connecting to device: ${device.deviceId}`);
     try {
       await connectToBleDevice(device);
-      console.log(`Successfully connected to ${device.deviceId}`);
-
       const servicesWithCharacteristics = await getDeviceServices(device);
       setDeviceServicesWithCharacteristics((prevServices) => ({
         ...prevServices,
         [device.deviceId]: servicesWithCharacteristics,
       }));
 
-      // Get battery level
       const batteryLevel = await getBatteryLevel(device.deviceId);
       setBatteryLevels((prevLevels) => ({
         ...prevLevels,
         [device.deviceId]: batteryLevel,
       }));
 
+      await readSerialNumber(device.deviceId);
+      setSerialNumbers((prevSerials) => ({
+        ...prevSerials,
+        [device.deviceId]: 'Fetching...',
+      }));
+
       setConnectedDeviceId(device.deviceId);
-      console.log(`Services and characteristics for device ${device.deviceId}:`, servicesWithCharacteristics);
     } catch (error) {
       console.error(`Error connecting to or retrieving services for device ${device.deviceId}:`, error);
     }
@@ -126,10 +112,8 @@ const BleScanPage: React.FC = () => {
   };
 
   const handleDisconnectFromDevice = async (device: BleDevice) => {
-    console.log(`Disconnecting from device: ${device.deviceId}`);
     try {
       await BleClient.disconnect(device.deviceId);
-      console.log(`Successfully disconnected from ${device.deviceId}`);
       setConnectedDeviceId(null);
     } catch (error) {
       console.error(`Error disconnecting from device ${device.deviceId}:`, error);
@@ -137,10 +121,8 @@ const BleScanPage: React.FC = () => {
   };
 
   const handleBeep = async (deviceId: string) => {
-    console.log(`Sending BEEP to device: ${deviceId}`);
     try {
       await sendBeep(deviceId);
-      console.log('BEEP command sent successfully');
     } catch (error) {
       console.error('Error sending BEEP command:', error);
     }
@@ -150,65 +132,72 @@ const BleScanPage: React.FC = () => {
     <IonPage>
       <IonHeader>
         <IonToolbar>
-          <IonTitle>BLE Scanner</IonTitle>
+          <IonTitle style={{ fontWeight: 'bold', color: '#009a9a' }}>BLE Scanner</IonTitle> {}
         </IonToolbar>
       </IonHeader>
       <IonContent fullscreen>
-        <IonButton expand="block" onClick={startScan} disabled={isScanning}>
-          {isScanning ? 'Scanning...' : 'Start Scan'}
-        </IonButton>
+        <IonCard className="ion-margin">
+          <IonCardContent>
+            <IonButton expand="block" onClick={handleStartScan} disabled={isScanning} style={{ backgroundColor: '#e96604' }}>
+              {isScanning ? 'Scanning...' : 'Start Scan'}
+            </IonButton>
+          </IonCardContent>
+        </IonCard>
 
         <IonList>
           <IonAccordionGroup>
             {devices.map((device) => (
               <IonAccordion key={device.deviceId} value={device.deviceId}>
-                <IonItem slot="header">
-                  <IonLabel>
-                    {formatBleDevice(device)}
-                  </IonLabel>
-                  <IonText
-                    style={{
-                      color: rssiDescriptions[device.deviceId]?.color,
-                      fontWeight: 'bold'
-                    }}
-                  >
-                    {rssiDescriptions[device.deviceId]?.description || 'Description not available'} ({device.rssi} dBm)
-                  </IonText>
+                <IonItem slot="header" color="light">
+                  <IonIcon icon={bluetooth} slot="start" />
+                  <IonLabel>{formatBleDevice(device)}</IonLabel>
+                  <IonBadge
+                  color={rssiDescriptions[device.deviceId]?.color}
+                  style={{
+                    padding: '8px',
+                    borderRadius: '16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    color: rssiDescriptions[device.deviceId]?.color 
+                  }}
+                >
+                  <IonIcon icon={wifi} />
+                  {rssiDescriptions[device.deviceId]?.description || 'Unknown'}
+                </IonBadge>
                 </IonItem>
+                <IonCard className="ion-no-margin" slot="content">
+                  <IonCardContent>
+                    {connectedDeviceId === device.deviceId && batteryLevels[device.deviceId] !== undefined && (
+                      <div className="ion-margin-bottom">
+                        <BatteryStatus batteryLevel={batteryLevels[device.deviceId]} />
+                        <IonText>
+                          <p>Serial Number: {serialNumbers[device.deviceId] || 'N/A'}</p>
+                        </IonText>
+                      </div>
+                    )}
 
-                <div className="ion-padding" slot="content">
-                  {connectedDeviceId === device.deviceId && batteryLevels[device.deviceId] !== undefined ? (
-                    <BatteryStatus batteryLevel={batteryLevels[device.deviceId]} />
-                  ) : null}
-
-                  {connectedDeviceId === device.deviceId ? (
-                    <>
+                    {connectedDeviceId === device.deviceId ? (
+                      <>
+                        <IonButton expand="block" color="danger" onClick={() => handleDisconnectFromDevice(device)}>
+                          Disconnect
+                        </IonButton>
+                        <IonButton expand="block" style={{ backgroundColor: '#e96604' }} onClick={() => handleBeep(device.deviceId)}>
+                          Send BEEP
+                        </IonButton>
+                      </>
+                    ) : (
                       <IonButton
                         expand="block"
-                        color="danger"
-                        onClick={() => handleDisconnectFromDevice(device)}
+                        onClick={() => handleConnectToDevice(device)}
+                        disabled={connectingDeviceId === device.deviceId}
+                        style={{ backgroundColor: '#e96604' }}
                       >
-                        Disconnect
+                        {connectingDeviceId === device.deviceId ? 'Connecting...' : 'Connect'}
                       </IonButton>
-
-                      <IonButton
-                        expand="block"
-                        color="tertiary"
-                        onClick={() => handleBeep(device.deviceId)}
-                      >
-                        Send BEEP
-                      </IonButton>
-                    </>
-                  ) : (
-                    <IonButton
-                      expand="block"
-                      onClick={() => handleConnectToDevice(device)}
-                      disabled={connectingDeviceId === device.deviceId}
-                    >
-                      {connectingDeviceId === device.deviceId ? 'Connecting...' : 'Connect'}
-                    </IonButton>
-                  )}
-                </div>
+                    )}
+                  </IonCardContent>
+                </IonCard>
               </IonAccordion>
             ))}
           </IonAccordionGroup>
@@ -218,9 +207,9 @@ const BleScanPage: React.FC = () => {
           expand="block"
           color="danger"
           fill="outline"
-          onClick={stopScan}
+          onClick={handleStopScan}
           disabled={!isScanning}
-          style={{ position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)', width: '90%' }}
+          className="ion-margin"
         >
           Stop Scan
         </IonButton>

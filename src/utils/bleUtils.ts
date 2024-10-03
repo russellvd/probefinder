@@ -1,10 +1,11 @@
-import { BleClient, BleDevice, hexStringToDataView } from '@capacitor-community/bluetooth-le';
+import { BleClient, BleDevice, hexStringToDataView, ScanResult } from '@capacitor-community/bluetooth-le';
 
 const PRIMARY_SERVICE = '71C47CD7-D486-4CA3-A350-8379EDFAED8C';
 const HEARTBEAT = '255E7B9C-ABF8-49BF-BE78-DD03B59D31A2';
 const BATTERY = '00002A19-0000-1000-8000-00805F9B34FB';
 const PRB_BTN = 'DCD0C4E2-BC02-40A7-B6D7-D994B421283B';
 const CMD_IN = '8C64619E-006E-4303-A8B9-9C4A9ADE5334';
+const CMD_OUT = 'A4676CF5-BBC4-428C-BB34-9D48906EA5A7'
 
 interface RssiThreshold {
   max: number;
@@ -159,4 +160,128 @@ export async function sendBeep(
     throw error;
   }
 }
+
+
+/**
+ * Subscribes to notifications on a characteristic and reads the response (e.g., serial number).
+ * @param deviceId The BLE device ID
+ * @param serviceUUID The service UUID (e.g., PRIMARY_SERVICE)
+ * @param characteristicUUID The characteristic UUID to subscribe to (e.g., CMD_IN or a separate one for notifications)
+ */
+export async function subscribeToNotifications(
+  deviceId: string,
+  serviceUUID: string,
+  characteristicUUID: string
+): Promise<void> {
+  try {
+    // Subscribe to notifications for the specified characteristic
+    await BleClient.startNotifications(
+      deviceId,
+      serviceUUID,
+      characteristicUUID,
+      (value) => {
+        const dataView = new DataView(value.buffer);
+
+        // Extract relevant fields from the acknowledgment format
+        const commandType = String.fromCharCode(dataView.getUint8(2)); // Command type
+        const commandCode = dataView.getUint8(3); // Command Code
+        const seqCommandNumber = (
+          (dataView.getUint8(4) << 0) |
+          (dataView.getUint8(5) << 8) |
+          (dataView.getUint8(6) << 16) |
+          (dataView.getUint8(7) << 24)
+        ); // Sequential Command Number
+
+        const dataByteCount = (
+          (dataView.getUint8(8) << 0) |
+          (dataView.getUint8(9) << 8)
+        ); // Data byte count
+
+        const dataChecksum = (
+          (dataView.getUint8(10) << 0) |
+          (dataView.getUint8(11) << 8)
+        ); // Data checksum
+
+        const headerChecksum = (
+          (dataView.getUint8(12) << 0) |
+          (dataView.getUint8(13) << 8)
+        ); // Header checksum
+
+        const commandStatus = (
+          (dataView.getUint8(14) << 0) |
+          (dataView.getUint8(15) << 8)
+        ); // Command Status
+
+        console.log(`Command Type: ${commandType}`);
+        console.log(`Command Code: ${commandCode}`);
+        console.log(`Sequential Command Number: ${seqCommandNumber}`);
+        console.log(`Data Byte Count: ${dataByteCount}`);
+        console.log(`Data Checksum: ${dataChecksum}`);
+        console.log(`Header Checksum: ${headerChecksum}`);
+        console.log(`Command Status: ${commandStatus}`);
+      }
+    );
+    console.log(`Subscribed to notifications for characteristic: ${characteristicUUID}`);
+  } catch (error) {
+    console.error(`Error subscribing to notifications:`, error);
+    throw error;
+  }
+}
+
+
+/**
+ * Reads the serial number of the BLE device.
+ * @param deviceId The BLE device ID
+ */
+export async function readSerialNumber(deviceId: string): Promise<void> {
+  try {
+    // Send the command to CMD_IN to request the serial number
+    const command = hexStringToDataView('0x21'); 
+
+    // Subscribe to notifications to receive the serial number
+    await subscribeToNotifications(deviceId, PRIMARY_SERVICE, CMD_OUT);
+    await BleClient.write(deviceId, PRIMARY_SERVICE, CMD_IN, command);
+    console.log('Request for serial number sent.');
+
+  } catch (error) {
+    console.error(`Error reading serial number:`, error);
+    throw error;
+  }
+}
+
+export async function startScan(callback: (result: { device: BleDevice; rssi: number }) => void): Promise<void> {
+  try {
+    await BleClient.initialize();
+    await BleClient.requestLEScan(
+      {
+        services: [PRIMARY_SERVICE],
+      },
+      (result) => {
+        const { device, rssi } = result;
+        if (rssi !== undefined) {
+          callback({ device, rssi });
+        }
+      }
+    );
+  } catch (error) {
+    console.error('Error scanning for BLE devices:', error);
+    throw error;
+  }
+}
+
+// New function in bleUtils.ts
+export async function stopScan(): Promise<void> {
+  try {
+    await BleClient.stopLEScan();
+  } catch (error) {
+    console.error('Error stopping BLE scan:', error);
+    throw error;
+  }
+}
+
+
+
+
+
+
 
