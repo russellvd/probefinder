@@ -13,11 +13,10 @@ interface RssiThreshold {
   color: string;
 }
 
-// Define the RSSI thresholds and corresponding descriptions
 const RSSI_THRESHOLDS: RssiThreshold[] = [
   { max: -60, label: 'VERY CLOSE', color: 'green' },
-  { max: -70, label: 'NEAR', color: 'lightgreen' },
-  { max: -80, label: 'FAR', color: 'orange' },
+  { max: -70, label: 'NEAR', color: 'green' },
+  { max: -80, label: 'FAR', color: 'darkorange' },
   { max: -90, label: 'VERY FAR', color: 'red' }
 ];
 
@@ -68,7 +67,7 @@ export async function scanForBleDevices(scanDuration: number = 2000): Promise<(B
 export function formatBleDevice(device: BleDevice & { rssi: number }): string {
   console.log("formatting device!");
   console.log(`Device:`);
-  return `Probe: ${device.name || 'Unnamed'} (ID: ${device.deviceId})`;
+  return `Probe: ${device.name || 'Unnamed'}`;
 }
 
 /**
@@ -229,9 +228,11 @@ export async function subscribeToNotifications(
 }
 
 
+
 /**
  * Reads the serial number of the BLE device.
- * @param deviceId The BLE device ID
+ * @param deviceId The BLE device ID\
+ * UNDER DEVELOPMENT...
  */
 export async function readSerialNumber(deviceId: string): Promise<void> {
   try {
@@ -241,13 +242,15 @@ export async function readSerialNumber(deviceId: string): Promise<void> {
     // Subscribe to notifications to receive the serial number
     await subscribeToNotifications(deviceId, PRIMARY_SERVICE, CMD_OUT);
     await BleClient.write(deviceId, PRIMARY_SERVICE, CMD_IN, command);
-    console.log('Request for serial number sent.');
 
   } catch (error) {
     console.error(`Error reading serial number:`, error);
     throw error;
   }
 }
+
+
+
 
 export async function startScan(callback: (result: { device: BleDevice; rssi: number }) => void): Promise<void> {
   try {
@@ -269,7 +272,6 @@ export async function startScan(callback: (result: { device: BleDevice; rssi: nu
   }
 }
 
-// New function in bleUtils.ts
 export async function stopScan(): Promise<void> {
   try {
     await BleClient.stopLEScan();

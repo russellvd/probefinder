@@ -41,7 +41,6 @@ const App: React.FC = () => (
   <IonApp>
     <IonReactRouter>
       <IonRouterOutlet>
-        <Route exact path="/ble-scan" component={BleScanPage} />
         <Route exact path="/home">
           <Home />
         </Route>
