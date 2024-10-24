@@ -2,12 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { IonContent, IonBadge, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonList, IonItem, IonLabel, IonAccordionGroup, IonAccordion, IonText, IonCard, IonCardContent, IonIcon, IonChip } from '@ionic/react';
 import { bluetooth, batteryFull, wifi, colorFill } from 'ionicons/icons';
 import { BleDevice, BleClient } from '@capacitor-community/bluetooth-le';
-import { formatBleDevice, connectToBleDevice, getRssiDescription, getDeviceServices, getBatteryLevel, sendBeep, readSerialNumber, startScan, stopScan } from '../utils/bleUtils';
+import { parseManufacturerData, formatBleDevice, connectToBleDevice, getRssiDescription, getDeviceServices, getBatteryLevel, sendBeep, readSerialNumber, startScan, stopScan } from '../utils/bleUtils';
 import BatteryStatus from '../components/BatteryStatus';
 import './customStyles.css'; 
 
 const Home: React.FC = () => {
-  const [devices, setDevices] = useState<(BleDevice & { rssi: number })[]>([]);
+  const [devices, setDevices] = useState<(BleDevice & { rssi: number,  parsedManufacturerData: { modelId: string, probeId: string, probeSerialNumber: string, batteryStateOfCharge: number }[] })[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [connectingDeviceId, setConnectingDeviceId] = useState<string | null>(null);
   const [connectedDeviceId, setConnectedDeviceId] = useState<string | null>(null);
@@ -53,21 +53,42 @@ const Home: React.FC = () => {
     }
   };
 
-  const handleScanResult = (result: { device: BleDevice; rssi: number }) => {
-    const { device, rssi } = result;
-
+  const handleScanResult = (result: { device: BleDevice; rssi: number; manufacturerData: { [key: string]: DataView } }) => {
+    const { device, rssi, manufacturerData } = result;
+  
+    // Define the mapping of probeId to readable names
+    const probeIdToNameMap: { [key: string]: string } = {
+      "0x11001401": "L8-3",
+      "0x11001402": "L13-5",
+      "0x11001403": "C5-2",
+      // Developers can add more mappings here
+    };
+  
+    // Parse the manufacturer data
+    const parsedDataArray = parseManufacturerData(manufacturerData);
+  
+    // Log the readable probe names
+    parsedDataArray.forEach(({ probeId }) => {
+      const probeName = probeIdToNameMap[probeId] || "Unknown";
+      console.log(`Readable Probe Name: ${probeName}`);
+    });
+  
+    // Update the device list with the new RSSI value
     setDevices((prevDevices) => {
       const existingDeviceIndex = prevDevices.findIndex((d) => d.deviceId === device.deviceId);
       if (existingDeviceIndex !== -1) {
         const updatedDevices = [...prevDevices];
-        updatedDevices[existingDeviceIndex] = { ...updatedDevices[existingDeviceIndex], rssi };
+        updatedDevices[existingDeviceIndex] = { ...updatedDevices[existingDeviceIndex], rssi, parsedManufacturerData: parsedDataArray };
         return updatedDevices;
       } else {
-        return [...prevDevices, { ...device, rssi }];
+        return [...prevDevices, { ...device, rssi, parsedManufacturerData: parsedDataArray }];
       }
     });
+  
+    // Update the RSSI description
     updateRssiDescription(device.deviceId, rssi);
   };
+  
 
   const updateRssiDescription = (deviceId: string, rssi: number) => {
     const rssiDescription = getRssiDescription(rssi);
@@ -103,7 +124,7 @@ const Home: React.FC = () => {
     }
   };
 
-  const handleConnectToDevice = async (device: BleDevice & { rssi: number }) => {
+  const handleConnectToDevice = async (device: BleDevice & { rssi: number; parsedManufacturerData: { modelId: string; probeId: string; probeSerialNumber: string; batteryStateOfCharge: number; }[] }) => {
     setConnectingDeviceId(device.deviceId);
     try {
       await connectToBleDevice(device);
@@ -187,36 +208,43 @@ const Home: React.FC = () => {
                   </IonBadge>
                 </IonItem>
                 <IonCard className="ion-no-margin" slot="content">
-                  <IonCardContent>
-                    {connectedDeviceId === device.deviceId && batteryLevels[device.deviceId] !== undefined && (
-                      <div className="ion-margin-bottom">
-                        <BatteryStatus batteryLevel={batteryLevels[device.deviceId]} />
-                      </div>
-                    )}
+                <IonCardContent>
+                  {/* Display serial number below the probe name */}
+                  <IonText>
+                    <strong>Serial number:</strong> {device.parsedManufacturerData[0]?.probeSerialNumber || 'Unknown'}
+                  </IonText>
 
-                    {connectedDeviceId === device.deviceId ? (
-                      <>
-                        <IonButton expand="block" color = 'danger'
-                        onClick={() => handleDisconnectFromDevice(device)}
-                        >
-                          Disconnect
-                        </IonButton>
-                        <IonButton expand="block" onClick={() => handleBeep(device.deviceId)}>
-                          Send BEEP
-                        </IonButton>
-                      </>
-                    ) : (
-                      <IonButton
-                        expand="block"
-                        color = 'primary'
-                        onClick={() => handleConnectToDevice(device)}
-                        disabled={connectingDeviceId === device.deviceId}
-                        style={{ backgroundColor: '#cccccc' }}
-                      >
-                        {connectingDeviceId === device.deviceId ? 'Connecting...' : 'Connect'}
+                  {/* Display battery status */}
+                  {connectedDeviceId === device.deviceId && (
+                    <div className="ion-margin-bottom">
+                      {batteryLevels[device.deviceId] !== undefined && (
+                        <BatteryStatus batteryLevel={batteryLevels[device.deviceId]} />
+                      )}
+                    </div>
+                  )}
+
+                  {/* Conditional buttons for connection state */}
+                  {connectedDeviceId === device.deviceId ? (
+                    <>
+                      <IonButton expand="block" color="danger" onClick={() => handleDisconnectFromDevice(device)}>
+                        Disconnect
                       </IonButton>
-                    )}
-                  </IonCardContent>
+                      <IonButton expand="block" onClick={() => handleBeep(device.deviceId)}>
+                        Send BEEP
+                      </IonButton>
+                    </>
+                  ) : (
+                    <IonButton
+                      expand="block"
+                      color="primary"
+                      onClick={() => handleConnectToDevice(device)}
+                      disabled={connectingDeviceId === device.deviceId}
+                      style={{ backgroundColor: '#cccccc' }}
+                    >
+                      {connectingDeviceId === device.deviceId ? 'Connecting...' : 'Connect'}
+                    </IonButton>
+                  )}
+                </IonCardContent>
                 </IonCard>
               </IonAccordion>
             ))}

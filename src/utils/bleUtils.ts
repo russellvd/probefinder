@@ -20,13 +20,15 @@ const RSSI_THRESHOLDS: RssiThreshold[] = [
   { max: -90, label: 'VERY FAR', color: 'red' }
 ];
 
+
+
 /**
  * Initializes the BLE module and starts scanning for devices.
  * @param scanDuration Duration of the scan in milliseconds (default: 2 second intervals)
  * @returns A promise that resolves to an array of discovered BLE devices
  */
-export async function scanForBleDevices(scanDuration: number = 2000): Promise<(BleDevice & { rssi: number })[]> {
-  const devices: (BleDevice & { rssi: number })[] = [];
+export async function scanForBleDevices(scanDuration: number = 2000): Promise<(BleDevice & { rssi: number, manufacturerData?: { [key: string]: DataView } })[]> {
+  const devices: (BleDevice & { rssi: number, manufacturerData?: { [key: string]: DataView } })[] = [];
   console.log("scan start!");
 
   try {
@@ -38,12 +40,16 @@ export async function scanForBleDevices(scanDuration: number = 2000): Promise<(B
         services: [PRIMARY_SERVICE], // filter by unique characteristic UUID to ensure *ONLY* probes appear
       },
       (result) => {
-        const { device, rssi } = result;
+        const { device, rssi, manufacturerData } = result;
         if (rssi !== undefined) {
-          const deviceWithRssi = { ...device, rssi }; // Add RSSI to the device object
-          if (!devices.some(d => d.deviceId === deviceWithRssi.deviceId)) {
+          const deviceWithRssiAndManufacturerData = {
+            ...device,
+            rssi,
+            manufacturerData // Add manufacturerData to the device object
+          };
+          if (!devices.some(d => d.deviceId === deviceWithRssiAndManufacturerData.deviceId)) {
               console.log("device pushed!");
-              devices.push(deviceWithRssi);
+              devices.push(deviceWithRssiAndManufacturerData);
           }
         }
       }
@@ -61,13 +67,29 @@ export async function scanForBleDevices(scanDuration: number = 2000): Promise<(B
 
 /**
  * Formats a BLE device object into a readable string.
- * @param device The BLE device object
+ * @param device The BLE device object with rssi and parsedManufacturerData
  * @returns A formatted string representation of the device
  */
-export function formatBleDevice(device: BleDevice & { rssi: number }): string {
+export function formatBleDevice(device: BleDevice & { rssi: number; parsedManufacturerData: { modelId: string; probeId: string; probeSerialNumber: string; batteryStateOfCharge: number; }[] }): string {
   console.log("formatting device!");
-  console.log(`Device:`);
-  return `Probe: ${device.name || 'Unnamed'}`;
+  console.log(`Device:`, device);
+
+  // Define the mapping of probeId to readable names
+  const probeIdToNameMap: { [key: string]: string } = {
+    "0x11001401": "L8-3",
+    "0x11001402": "L13-5",
+    "0x11001403": "C5-2",
+    // Developers can add more mappings here
+  };
+
+  // Get the first parsedManufacturerData (assuming one entry for each device)
+  const parsedData = device.parsedManufacturerData[0]; 
+
+  // Extract the readable probe name
+  const probeName = probeIdToNameMap[parsedData.probeId] || 'Unknown Probe';
+
+  // Return the formatted string using the readable probe name
+  return `Probe: ${probeName}`;
 }
 
 /**
@@ -75,7 +97,7 @@ export function formatBleDevice(device: BleDevice & { rssi: number }): string {
  * @param device The BLE device to connect to
  * @returns A promise that resolves when the connection is established
  */
-export async function connectToBleDevice(device: BleDevice & { rssi: number }): Promise<void> {
+export async function connectToBleDevice(device: BleDevice & { rssi: number; parsedManufacturerData: { modelId: string; probeId: string; probeSerialNumber: string; batteryStateOfCharge: number; }[] }): Promise<void> {
   try {
     console.log(`Attempting to connect to device: ${formatBleDevice(device)}`);
     await BleClient.connect(device.deviceId);
@@ -162,7 +184,7 @@ export async function sendBeep(
 
 
 /**
- * Subscribes to notifications on a characteristic and reads the response (e.g., serial number).
+ * Subscribes to notifications on a characteristic and reads the response 
  * @param deviceId The BLE device ID
  * @param serviceUUID The service UUID (e.g., PRIMARY_SERVICE)
  * @param characteristicUUID The characteristic UUID to subscribe to (e.g., CMD_IN or a separate one for notifications)
@@ -252,7 +274,7 @@ export async function readSerialNumber(deviceId: string): Promise<void> {
 
 
 
-export async function startScan(callback: (result: { device: BleDevice; rssi: number }) => void): Promise<void> {
+export async function startScan(callback: (result: { device: BleDevice; rssi: number; manufacturerData: { [key: string]: DataView } }) => void): Promise<void> {
   try {
     await BleClient.initialize();
     await BleClient.requestLEScan(
@@ -260,9 +282,9 @@ export async function startScan(callback: (result: { device: BleDevice; rssi: nu
         services: [PRIMARY_SERVICE],
       },
       (result) => {
-        const { device, rssi } = result;
-        if (rssi !== undefined) {
-          callback({ device, rssi });
+        const { device, rssi, manufacturerData } = result;
+        if (rssi !== undefined && manufacturerData !== undefined) {
+          callback({ device, rssi, manufacturerData });
         }
       }
     );
@@ -281,9 +303,56 @@ export async function stopScan(): Promise<void> {
   }
 }
 
+export const logManufacturerData = (manufacturerData: { [key: string]: DataView }) => {
+  Object.keys(manufacturerData).forEach((key) => {
+    const dataView = manufacturerData[key];
 
+    let hexString = '';
+    for (let i = 0; i < dataView.byteLength; i++) {
+      const byte = dataView.getUint8(i);
+      hexString += byte.toString(16).padStart(2, '0') + ' ';
+    }
 
+    console.log(`Manufacturer Data for key ${key}:`, hexString.trim());
+  });
+};
 
+export const parseManufacturerData = (manufacturerData: { [key: string]: DataView }): Array<{ modelId: string, probeId: string, probeSerialNumber: string, batteryStateOfCharge: number }> => {
+  const parsedDataArray: Array<{ modelId: string, probeId: string, probeSerialNumber: string, batteryStateOfCharge: number }> = [];
 
+  // Loop through each key in the manufacturerData
+  Object.keys(manufacturerData).forEach((key) => {
+    const dataView = manufacturerData[key];
 
+    // Function to read 4 bytes in little-endian order and return hex string
+    const readLittleEndianUint32 = (offset: number) => {
+      return `0x${dataView.getUint8(offset + 3).toString(16).padStart(2, '0')}${dataView.getUint8(offset + 2).toString(16).padStart(2, '0')}${dataView.getUint8(offset + 1).toString(16).padStart(2, '0')}${dataView.getUint8(offset).toString(16).padStart(2, '0')}`;
+    };
 
+    // Parse the manufacturer data as little-endian
+    const modelId = readLittleEndianUint32(0);  // 00 23 00 11 -> 0x11002300
+    const probeId = readLittleEndianUint32(4);  // 01 14 00 11 -> 0x11001401
+    const probeSerialNumber = readLittleEndianUint32(8); // 50 16 00 11 -> 0x11001650
+
+    // Battery state of charge is at position 19 (last byte)
+    const batteryStateOfCharge = dataView.getUint8(19);  // 5A -> 90%
+
+    
+    // Log the parsed data
+    console.log(`Manufacturer Data for key ${key}:`);
+    console.log(`Model ID: ${modelId}`);
+    console.log(`Probe ID: ${probeId}`);
+    console.log(`Probe Serial Number: ${probeSerialNumber}`);
+    console.log(`Battery State of Charge: ${batteryStateOfCharge}%`);
+
+    // Push the parsed data to the array
+    parsedDataArray.push({
+      modelId,
+      probeId,
+      probeSerialNumber,
+      batteryStateOfCharge
+    });
+  });
+
+  return parsedDataArray;
+};
