@@ -87,9 +87,9 @@ export function formatBleDevice(device: BleDevice & { rssi: number; parsedManufa
 
   // Extract the readable probe name
   const probeName = probeIdToNameMap[parsedData.probeId] || 'Unknown Probe';
-
+  const serialNum = parsedData.probeSerialNumber;
   // Return the formatted string using the readable probe name
-  return `Probe: ${probeName}`;
+  return `Probe: ${probeName} ${serialNum}`;
 }
 
 /**
@@ -274,6 +274,15 @@ export async function readSerialNumber(deviceId: string): Promise<void> {
 
 
 
+/**
+ * Starts scanning for BLE devices with the specified service and provides results through a callback.
+ * The result includes the device, RSSI, and manufacturer data.
+ * 
+ * @param {function} callback - A function that is called when a BLE device is found. 
+ * It receives an object containing the device, RSSI, and manufacturer data.
+ * @returns {Promise<void>} - A promise that resolves when the scan starts successfully.
+ * @throws {Error} - If there is an issue starting the BLE scan.
+ */
 export async function startScan(callback: (result: { device: BleDevice; rssi: number; manufacturerData: { [key: string]: DataView } }) => void): Promise<void> {
   try {
     await BleClient.initialize();
@@ -294,6 +303,12 @@ export async function startScan(callback: (result: { device: BleDevice; rssi: nu
   }
 }
 
+/**
+ * Stops the ongoing BLE device scan.
+ * 
+ * @returns {Promise<void>} - A promise that resolves when the scan is stopped successfully.
+ * @throws {Error} - If there is an issue stopping the BLE scan.
+ */
 export async function stopScan(): Promise<void> {
   try {
     await BleClient.stopLEScan();
@@ -303,6 +318,12 @@ export async function stopScan(): Promise<void> {
   }
 }
 
+/**
+ * Logs the raw manufacturer data from BLE devices in hexadecimal format.
+ * 
+ * @param {Object} manufacturerData - An object where each key corresponds to a device,
+ * and the value is a DataView containing the raw manufacturer data.
+ */
 export const logManufacturerData = (manufacturerData: { [key: string]: DataView }) => {
   Object.keys(manufacturerData).forEach((key) => {
     const dataView = manufacturerData[key];
@@ -315,8 +336,17 @@ export const logManufacturerData = (manufacturerData: { [key: string]: DataView 
 
     console.log(`Manufacturer Data for key ${key}:`, hexString.trim());
   });
-};
+}
 
+/**
+ * Parses the manufacturer data from BLE devices, extracting the model ID, probe ID,
+ * probe serial number (without the "0x" prefix), and battery state of charge.
+ * 
+ * @param {Object} manufacturerData - An object where each key corresponds to a device,
+ * and the value is a DataView containing the raw manufacturer data.
+ * @returns {Array<{ modelId: string, probeId: string, probeSerialNumber: string, batteryStateOfCharge: number }>} 
+ * An array of objects, each containing the parsed model ID, probe ID, probe serial number, and battery state of charge.
+ */
 export const parseManufacturerData = (manufacturerData: { [key: string]: DataView }): Array<{ modelId: string, probeId: string, probeSerialNumber: string, batteryStateOfCharge: number }> => {
   const parsedDataArray: Array<{ modelId: string, probeId: string, probeSerialNumber: string, batteryStateOfCharge: number }> = [];
 
@@ -325,19 +355,19 @@ export const parseManufacturerData = (manufacturerData: { [key: string]: DataVie
     const dataView = manufacturerData[key];
 
     // Function to read 4 bytes in little-endian order and return hex string
-    const readLittleEndianUint32 = (offset: number) => {
-      return `0x${dataView.getUint8(offset + 3).toString(16).padStart(2, '0')}${dataView.getUint8(offset + 2).toString(16).padStart(2, '0')}${dataView.getUint8(offset + 1).toString(16).padStart(2, '0')}${dataView.getUint8(offset).toString(16).padStart(2, '0')}`;
+    const readLittleEndianUint32 = (offset: number, omitPrefix: boolean = false) => {
+      const hexString = `${dataView.getUint8(offset + 3).toString(16).padStart(2, '0')}${dataView.getUint8(offset + 2).toString(16).padStart(2, '0')}${dataView.getUint8(offset + 1).toString(16).padStart(2, '0')}${dataView.getUint8(offset).toString(16).padStart(2, '0')}`;
+      return omitPrefix ? hexString : `0x${hexString}`;
     };
 
     // Parse the manufacturer data as little-endian
     const modelId = readLittleEndianUint32(0);  // 00 23 00 11 -> 0x11002300
     const probeId = readLittleEndianUint32(4);  // 01 14 00 11 -> 0x11001401
-    const probeSerialNumber = readLittleEndianUint32(8); // 50 16 00 11 -> 0x11001650
+    const probeSerialNumber = readLittleEndianUint32(8, true); // 50 16 00 11 -> 11001650 (no 0x prefix)
 
     // Battery state of charge is at position 19 (last byte)
     const batteryStateOfCharge = dataView.getUint8(19);  // 5A -> 90%
 
-    
     // Log the parsed data
     console.log(`Manufacturer Data for key ${key}:`);
     console.log(`Model ID: ${modelId}`);
@@ -355,4 +385,4 @@ export const parseManufacturerData = (manufacturerData: { [key: string]: DataVie
   });
 
   return parsedDataArray;
-};
+}

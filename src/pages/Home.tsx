@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { IonContent, IonBadge, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonList, IonItem, IonLabel, IonAccordionGroup, IonAccordion, IonText, IonCard, IonCardContent, IonIcon, IonChip } from '@ionic/react';
-import { bluetooth, batteryFull, wifi, colorFill } from 'ionicons/icons';
+import { bluetooth, wifi } from 'ionicons/icons';
 import { BleDevice, BleClient } from '@capacitor-community/bluetooth-le';
-import { parseManufacturerData, formatBleDevice, connectToBleDevice, getRssiDescription, getDeviceServices, getBatteryLevel, sendBeep, readSerialNumber, startScan, stopScan } from '../utils/bleUtils';
+import { parseManufacturerData, formatBleDevice, connectToBleDevice, getRssiDescription, getDeviceServices, getBatteryLevel, sendBeep, startScan, stopScan } from '../utils/bleUtils';
 import BatteryStatus from '../components/BatteryStatus';
 import './customStyles.css'; 
 
