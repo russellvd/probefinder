@@ -21,50 +21,6 @@ const RSSI_THRESHOLDS: RssiThreshold[] = [
 ];
 
 
-
-/**
- * Initializes the BLE module and starts scanning for devices.
- * @param scanDuration Duration of the scan in milliseconds (default: 2 second intervals)
- * @returns A promise that resolves to an array of discovered BLE devices
- */
-export async function scanForBleDevices(scanDuration: number = 2000): Promise<(BleDevice & { rssi: number, manufacturerData?: { [key: string]: DataView } })[]> {
-  const devices: (BleDevice & { rssi: number, manufacturerData?: { [key: string]: DataView } })[] = [];
-  console.log("scan start!");
-
-  try {
-    await BleClient.initialize();
-    console.log("ble initialized!");
-    // Request BLE permissions (for Android)
-    await BleClient.requestLEScan(
-      {
-        services: [PRIMARY_SERVICE], // filter by unique characteristic UUID to ensure *ONLY* probes appear
-      },
-      (result) => {
-        const { device, rssi, manufacturerData } = result;
-        if (rssi !== undefined) {
-          const deviceWithRssiAndManufacturerData = {
-            ...device,
-            rssi,
-            manufacturerData // Add manufacturerData to the device object
-          };
-          if (!devices.some(d => d.deviceId === deviceWithRssiAndManufacturerData.deviceId)) {
-              console.log("device pushed!");
-              devices.push(deviceWithRssiAndManufacturerData);
-          }
-        }
-      }
-    );
-
-    // Stop scanning after the specified duration
-    await new Promise(resolve => setTimeout(resolve, scanDuration));
-    await BleClient.stopLEScan();
-    return devices;
-  } catch (error) {
-    console.error('Error scanning for BLE devices:', error);
-    throw error;
-  }
-}
-
 /**
  * Formats a BLE device object into a readable string.
  * @param device The BLE device object with rssi and parsedManufacturerData
@@ -101,6 +57,9 @@ export async function connectToBleDevice(device: BleDevice & { rssi: number; par
   try {
     console.log(`Attempting to connect to device: ${formatBleDevice(device)}`);
     await BleClient.connect(device.deviceId);
+    if (!BleClient.isBonded(device.deviceId)) {
+      await BleClient.createBond(device.deviceId);
+    }
     console.log(`Successfully connected to device: ${formatBleDevice(device)}`);
   } catch (error) {
     console.error(`Error connecting to device ${device.deviceId}:`, error);
@@ -248,30 +207,6 @@ export async function subscribeToNotifications(
     throw error;
   }
 }
-
-
-
-/**
- * Reads the serial number of the BLE device.
- * @param deviceId The BLE device ID\
- * UNDER DEVELOPMENT...
- */
-export async function readSerialNumber(deviceId: string): Promise<void> {
-  try {
-    // Send the command to CMD_IN to request the serial number
-    const command = hexStringToDataView('0x21'); 
-
-    // Subscribe to notifications to receive the serial number
-    await subscribeToNotifications(deviceId, PRIMARY_SERVICE, CMD_OUT);
-    await BleClient.write(deviceId, PRIMARY_SERVICE, CMD_IN, command);
-
-  } catch (error) {
-    console.error(`Error reading serial number:`, error);
-    throw error;
-  }
-}
-
-
 
 
 /**

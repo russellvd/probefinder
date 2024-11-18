@@ -7,7 +7,7 @@ import BatteryStatus from '../components/BatteryStatus';
 import './customStyles.css'; 
 
 const Home: React.FC = () => {
-  const [devices, setDevices] = useState<(BleDevice & { rssi: number,  parsedManufacturerData: { modelId: string, probeId: string, probeSerialNumber: string, batteryStateOfCharge: number }[] })[]>([]);
+  const [devices, setDevices] = useState<(BleDevice & { rssi: number, parsedManufacturerData: { modelId: string, probeId: string, probeSerialNumber: string, batteryStateOfCharge: number }[], lastSeen: number })[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [connectingDeviceId, setConnectingDeviceId] = useState<string | null>(null);
   const [connectedDeviceId, setConnectedDeviceId] = useState<string | null>(null);
@@ -17,17 +17,28 @@ const Home: React.FC = () => {
   const [serialNumbers, setSerialNumbers] = useState<{ [deviceId: string]: string }>({});
   const rssiUpdateIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const batteryUpdateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
 
   useEffect(() => {
-    return () => {
-      if (isScanning) {
-        stopScan();
-      }
-      if (batteryUpdateIntervalRef.current) {
-        clearInterval(batteryUpdateIntervalRef.current);
-      }
-    };
-  }, []);
+    const interval = setInterval(() => {
+      setDevices((prevDevices) => {
+        const now = Date.now();
+        const maxInactivityTime = 15000;  // 15 seconds of inactivity before removing a device
+        
+        return prevDevices.filter((device) => {
+          // If the device is connected, don't remove it, even if lastSeen is old
+          if (connectedDeviceId === device.deviceId) {
+            return true;
+          }
+
+          return now - device.lastSeen <= maxInactivityTime;
+        });
+      });
+    }, 5000);  // check every 5 seconds
+  
+    return () => clearInterval(interval);
+  }, [connectedDeviceId]);  // watch for changes in connected device
+  
 
   const handleStartScan = async () => {
     setIsScanning(true);
@@ -55,39 +66,28 @@ const Home: React.FC = () => {
 
   const handleScanResult = (result: { device: BleDevice; rssi: number; manufacturerData: { [key: string]: DataView } }) => {
     const { device, rssi, manufacturerData } = result;
-  
-    // Define the mapping of probeId to readable names
-    const probeIdToNameMap: { [key: string]: string } = {
-      "0x11001401": "L8-3",
-      "0x11001402": "L13-5",
-      "0x11001403": "C5-2",
-      // Developers can add more mappings here
-    };
-  
-    // Parse the manufacturer data
     const parsedDataArray = parseManufacturerData(manufacturerData);
+    const now = Date.now();  // current timestamp
   
-    // Log the readable probe names
-    parsedDataArray.forEach(({ probeId }) => {
-      const probeName = probeIdToNameMap[probeId] || "Unknown";
-      console.log(`Readable Probe Name: ${probeName}`);
-    });
-  
-    // Update the device list with the new RSSI value
     setDevices((prevDevices) => {
       const existingDeviceIndex = prevDevices.findIndex((d) => d.deviceId === device.deviceId);
       if (existingDeviceIndex !== -1) {
         const updatedDevices = [...prevDevices];
-        updatedDevices[existingDeviceIndex] = { ...updatedDevices[existingDeviceIndex], rssi, parsedManufacturerData: parsedDataArray };
+        updatedDevices[existingDeviceIndex] = {
+          ...updatedDevices[existingDeviceIndex],
+          rssi,
+          parsedManufacturerData: parsedDataArray,
+          lastSeen: now,  // update timestamp
+        };
         return updatedDevices;
       } else {
-        return [...prevDevices, { ...device, rssi, parsedManufacturerData: parsedDataArray }];
+        return [...prevDevices, { ...device, rssi, parsedManufacturerData: parsedDataArray, lastSeen: now }];
       }
     });
   
-    // Update the RSSI description
     updateRssiDescription(device.deviceId, rssi);
   };
+  
   
 
   const updateRssiDescription = (deviceId: string, rssi: number) => {
@@ -267,4 +267,3 @@ const Home: React.FC = () => {
 };
 
 export default Home;
-
